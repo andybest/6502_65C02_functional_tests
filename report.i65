@@ -9,25 +9,32 @@
 ;I/O hardware may have to be initialized in report_init
 
 ;print message macro - \1 = message location
-rprt    macro
+rep_int = 1
+DUART_BASE = $0200
+DUART_TX_A = DUART_BASE + 3
+DUART_RX_A = DUART_BASE + 3
+DUART_STATUS_A = DUART_BASE + 1
+
+.macro rprt str
+        .local loop
         ldx #0
-        lda \1
-loop\?
+        lda str
+loop:
         jsr rchar
         inx
-        lda \1,x
-        bne loop\?
-        endm
+        lda str,x
+        bne loop
+.endmacro
 
 ;initialize I/O as required (example: configure & enable ACIA)
-report_init
+report_init:
         ;nothing to initialize
         rprt rmsg_start
         rts
         
 ;show stack (with saved registers), zeropage and absolute memory workspace
 ;after an error was trapped in the test program
-report_error
+report_error:
 ;save registers
         php
         pha
@@ -44,7 +51,7 @@ report_error
         jsr rhex
         txa         ;address low
         jsr rhex
-rstack  jsr rspace
+rstack: jsr rspace
         lda $100,x  ;stack data
         jsr rhex
         inx
@@ -56,7 +63,7 @@ rstack  jsr rspace
         lda #zpt
         tax
         jsr rhex
-rzp     jsr rspace
+rzp:    jsr rspace
         lda 0,x
         jsr rhex
         inx
@@ -64,12 +71,12 @@ rzp     jsr rspace
         bne rzp
         jsr rcrlf
 ;show absolute workspace
-        lda #hi(data_segment)
+        lda #>data_segment
         jsr rhex
-        lda #lo(data_segment)
+        lda #<data_segment
         jsr rhex
         ldx #0
-rabs    jsr rspace
+rabs:   jsr rspace
         lda data_segment,x
         jsr rhex
         inx
@@ -77,7 +84,7 @@ rabs    jsr rspace
         bne rabs
 ;ask to continue
         rprt rmsg_cont
-rerr1   jsr rget
+rerr1:  jsr rget
         cmp #'C'
         bne rerr1        
 ;restore registers
@@ -90,8 +97,8 @@ rerr1   jsr rget
         rts   
 
 ;show test has ended, ask to repeat
-report_success
-    if rep_int = 1
+report_success:
+    .if rep_int = 1
         rprt rmsg_priority
         lda data_segment    ;show interrupt sequence
         jsr rhex
@@ -101,9 +108,9 @@ report_success
         jsr rspace
         lda data_segment+2
         jsr rhex
-    endif
+    .endif
         rprt rmsg_success
-rsuc1   jsr rget
+rsuc1:  jsr rget
         cmp #'R'
         bne rsuc1        
         rts
@@ -111,30 +118,25 @@ rsuc1   jsr rget
 ;input subroutine
 ;get a character from standard input 
 ;adjust according to the needs in your test environment
-rget                ;get character in A
-;rget1
-;        lda $bff1   ;wait RDRF
-;        and #8
-;        beq rget1
-;not a real ACIA - so RDRF is not checked
-        lda $bff0   ;read acia rx reg
-;the load can be replaced by a call to a kernal routine
-;        jsr $ffcf   ;example: CHRIN for a C64
+rget:               ;get character in A
+        lda DUART_RX_A
+        beq rget
+        rts
         cmp #'a'    ;lower case
         bcc rget1
         and #$5f    ;convert to upper case
-rget1   rts
+rget1:  rts
 
 ;output subroutines
-rcrlf   lda #10
+rcrlf:  lda #10
         jsr rchar
         lda #13
         bne rchar
 
-rspace  lda #' '
+rspace: lda #' '
         bne rchar
         
-rhex    pha         ;report hex byte in A
+rhex:   pha         ;report hex byte in A
         lsr a       ;high nibble first
         lsr a
         lsr a
@@ -143,7 +145,7 @@ rhex    pha         ;report hex byte in A
         pla         ;now low nibble
         and #$f
 
-rnib    clc         ;report nibble in A
+rnib:   clc         ;report nibble in A
         adc #'0'    ;make printable 0-9
         cmp #'9'+1
         bcc rchar
@@ -152,28 +154,26 @@ rnib    clc         ;report nibble in A
 ;send a character to standard output 
 ;adjust according to the needs in your test environment
 ;register X needs to be preserved!
-rchar               ;report character in A
-;        pha         ;wait TDRF
-;rchar1  lda $bff1
-;        and #$10
-;        beq rchar1
-;        pla
-;not a real ACIA - so TDRF is not checked
-        sta $bff0   ;write acia tx reg
-;the store can be replaced by a call to a kernal routine
-;        jsr $ffd2   ;example: CHROUT for a C64
+rchar:              ;report character in A
+        pha
+writewait:
+        lda #$10
+        bit DUART_STATUS_A
+        bne writewait
+        pla
+        sta DUART_TX_A
         rts
 
-rmsg_start
-        db  10,13,"Started testing",10,13,0
-rmsg_stack
-        db  10,13,"regs Y  X  A  PS PCLPCH",10,13,0
-rmsg_cont
-        db  10,13,"press C to continue",10,13,0
-rmsg_success
-        db  10,13,"All tests completed, press R to repeat",10,13,0
-    if rep_int = 1
-rmsg_priority
-        db  10,13,"interrupt sequence (NMI IRQ BRK) ",0
-    endif
+rmsg_start:
+        .byte  $0A, "Started testing",$0A,0
+rmsg_stack:
+        .byte  $0A,"regs Y  X  A  PS PCLPCH",$0A,0
+rmsg_cont:
+        .byte  $0A,"press C to continue",$0A,0
+rmsg_success:
+        .byte  $0A,"All tests completed, press R to repeat",$0A,0
+    .if rep_int = 1
+rmsg_priority:
+        .byte  $0A,"interrupt sequence (NMI IRQ BRK) ",0
+    .endif
    
